@@ -70,4 +70,19 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
             multipliers = [float(r[1]) for r in rows if r[1]]
 
         avg = sum(multipliers) / len(multipliers)
-        prediction = f"🔮 Based
+        prediction = f"🔮 Based on the last {len(multipliers)} kicks:\nEstimated next multiplier: {avg:.2f}x"
+        await update.message.reply_text(prediction)
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Error loading data: {e}")
+
+# === Run Everything ===
+if __name__ == "__main__":
+    # Start logging thread
+    threading.Thread(target=log_loop, daemon=True).start()
+
+    # Start bot
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("predict", predict))
+    app.run_polling()
