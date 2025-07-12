@@ -3,8 +3,8 @@ import csv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-AUTHORIZED_USERNAME = os.environ.get("AUTHORIZED_USERNAME")
+BOT_TOKEN = os.environ.get("7663833155:AAHbzU-mGaukLUv056psU3bS05uBBs_qoyg")
+AUTHORIZED_USERNAME = os.environ.get("@VladimirchiefSK")
 
 def mock_predict(data):
     return "Medium (1.6–2.9x) — [AI model coming soon]"
