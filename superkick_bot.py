@@ -22,6 +22,12 @@ SUPERKICK_URL = "https://www.msport.com/gh/games/superkick"
 if not BOT_TOKEN:
     raise ValueError("❌ BOT_TOKEN is missing. Set it in Railway → Variables")
 
+# === Ensure CSV file exists ===
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "multiplier"])  # header row
+
 # === Selenium Setup ===
 def setup_driver():
     chrome_options = Options()
@@ -66,8 +72,13 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         with open(CSV_FILE, "r") as f:
-            rows = list(csv.reader(f))[-10:]  # last 10 values
-            multipliers = [float(r[1]) for r in rows if r[1]]
+            rows = list(csv.reader(f))[1:]  # skip header
+            if len(rows) < 1:
+                await update.message.reply_text("⚠️ Not enough data yet. Wait for the logger to collect more.")
+                return
+
+            recent = rows[-10:]  # last 10 values
+            multipliers = [float(r[1]) for r in recent if r[1]]
 
         avg = sum(multipliers) / len(multipliers)
         prediction = f"🔮 Based on the last {len(multipliers)} kicks:\nEstimated next multiplier: {avg:.2f}x"
