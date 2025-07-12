@@ -52,7 +52,7 @@ def log_loop():
 
 # === Telegram Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Welcome to SuperKick AI Bot!\nUse /predict to get a forecast.")
+    await update.message.reply_text("👋 Welcome to SuperKick AI Bot!\nUse /predict or /history.")
 
 async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user.username
@@ -63,27 +63,46 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(CSV_FILE, "r") as f:
             rows = list(csv.reader(f))[1:]  # skip header
-            if len(rows) < 1:
-                await update.message.reply_text("⚠️ Not enough data yet. Wait for a few rounds.")
+            if len(rows) < 3:
+                await update.message.reply_text("⚠️ Not enough data yet. Wait for at least 3 rounds.")
                 return
 
-            recent = rows[-10:]
+            recent = rows[-5:]  # Use last 5 entries
             multipliers = [float(r[1]) for r in recent if r[1]]
 
         avg = sum(multipliers) / len(multipliers)
-        prediction = f"🔮 Based on the last {len(multipliers)} kicks:\nEstimated next multiplier: {avg:.2f}x"
+        prediction = f"🔮 Based on the last {len(multipliers)} rounds:\nEstimated next multiplier: {avg:.2f}x"
         await update.message.reply_text(prediction)
 
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error reading data: {e}")
 
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user.username
+    if user != AUTHORIZED_USERNAME:
+        await update.message.reply_text("⛔ You're not authorized to use this bot.")
+        return
+
+    try:
+        with open(CSV_FILE, "r") as f:
+            rows = list(csv.reader(f))[1:]  # skip header
+            if not rows:
+                await update.message.reply_text("📉 No data logged yet.")
+                return
+
+            last_entries = rows[-5:]
+            formatted = "\n".join([f"{r[0].split('T')[1][:8]} — {r[1]}x" for r in last_entries])
+            await update.message.reply_text(f"📜 Last 5 multipliers:\n{formatted}")
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Error reading history: {e}")
+
 # === Main Execution ===
 if __name__ == "__main__":
-    # Start logging thread
     threading.Thread(target=log_loop, daemon=True).start()
 
-    # Start Telegram bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("predict", predict))
+    app.add_handler(CommandHandler("history", history))
     app.run_polling()
