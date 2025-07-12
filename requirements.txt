@@ -1,5 +1,3 @@
 python-telegram-bot==20.7
 pandas
-Enter "help" below or click "Help" above for more information.
->>> python-telegram-bot==20.7
-... pandas
+
