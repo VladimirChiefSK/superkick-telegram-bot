@@ -7,11 +7,7 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import sync_playwright
 
 # === Configuration ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -28,28 +24,22 @@ if not os.path.exists(CSV_FILE):
         writer = csv.writer(f)
         writer.writerow(["timestamp", "multiplier"])  # header row
 
-# === Selenium Setup ===
-def setup_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    return webdriver.Chrome(options=chrome_options)
-
-driver = setup_driver()
-
-# === Background Logger ===
+# === Playwright Scraper ===
 def extract_multiplier():
     try:
-        driver.get(SUPERKICK_URL)
-        wait = WebDriverWait(driver, 10)
-        element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "sk-animation-odds")))
-        multiplier = element.text.strip().replace("x", "")
-        return float(multiplier)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(SUPERKICK_URL, timeout=60000)
+            page.wait_for_selector(".sk-animation-odds", timeout=10000)
+            text = page.locator(".sk-animation-odds").text_content().strip()
+            browser.close()
+            return float(text.replace("x", ""))
     except Exception as e:
-        print(f"[!] Error: {e}")
+        print(f"[!] Error extracting multiplier: {e}")
         return None
 
+# === Background Logger ===
 def log_loop():
     while True:
         multiplier = extract_multiplier()
@@ -60,7 +50,7 @@ def log_loop():
                 print(f"[+] Logged: {multiplier}")
         time.sleep(10)
 
-# === Telegram Bot Handlers ===
+# === Telegram Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Welcome to SuperKick AI Bot!\nUse /predict to get a forecast.")
 
@@ -74,10 +64,10 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(CSV_FILE, "r") as f:
             rows = list(csv.reader(f))[1:]  # skip header
             if len(rows) < 1:
-                await update.message.reply_text("⚠️ Not enough data yet. Wait for the logger to collect more.")
+                await update.message.reply_text("⚠️ Not enough data yet. Wait for a few rounds.")
                 return
 
-            recent = rows[-10:]  # last 10 values
+            recent = rows[-10:]
             multipliers = [float(r[1]) for r in recent if r[1]]
 
         avg = sum(multipliers) / len(multipliers)
@@ -85,14 +75,14 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(prediction)
 
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Error loading data: {e}")
+        await update.message.reply_text(f"⚠️ Error reading data: {e}")
 
-# === Run Everything ===
+# === Main Execution ===
 if __name__ == "__main__":
     # Start logging thread
     threading.Thread(target=log_loop, daemon=True).start()
 
-    # Start bot
+    # Start Telegram bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("predict", predict))
