@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Ensure Chromium is installed
+echo "Installing Playwright browsers..."
 npx playwright install chromium
 
-# Start your bot
+echo "Starting SuperKick bot..."
 python superkick_bot.py
