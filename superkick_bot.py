@@ -131,12 +131,18 @@ async def predict_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prediction = predict_with_lstm()
     await update.message.reply_text(prediction)
 
-if __name__ == '__main__':
+async def main():
     if not BOT_TOKEN:
         raise ValueError("❌ BOT_TOKEN is missing. Set it in Railway → Variables")
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("predict", predict_command))
 
+    # Start background logging
     asyncio.create_task(log_multiplier())
-    app.run_polling()
+
+    # Start Telegram bot
+    await app.run_polling()
+
+if __name__ == '__main__':
+    asyncio.run(main())
