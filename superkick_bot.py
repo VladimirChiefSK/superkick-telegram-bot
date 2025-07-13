@@ -5,6 +5,8 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from playwright.async_api import async_playwright
+from sklearn.linear_model import LinearRegression
+import numpy as np
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -51,17 +53,27 @@ async def log_multiplier():
             writer.writerow([value, datetime.now().isoformat()])
         print(f"[+] Logged multiplier: {value}")
 
-# Predict based on past values
+# ML Prediction using linear regression
 async def predict():
     try:
         with open("superkick_data.csv", "r") as f:
             rows = list(csv.reader(f))[1:]
         values = [float(r[0]) for r in rows if float(r[0]) > 0]
+
         if len(values) < 10:
             return None
-        avg = round(sum(values[-10:]) / 10, 2)
-        return avg
-    except:
+
+        x = np.array(range(len(values))).reshape(-1, 1)
+        y = np.array(values).reshape(-1, 1)
+
+        model = LinearRegression()
+        model.fit(x, y)
+
+        next_index = np.array([[len(values)]])
+        predicted = model.predict(next_index)[0][0]
+        return round(predicted, 2)
+    except Exception as e:
+        print(f"[!] ML prediction error: {e}")
         return None
 
 # Command: /predict
@@ -83,11 +95,21 @@ async def log_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error reading log: {e}")
 
+# Background task to auto-log every 30 seconds
+async def background_logger():
+    while True:
+        await log_multiplier()
+        await asyncio.sleep(30)
+
 # Setup and run bot
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("predict", predict_handler))
 app.add_handler(CommandHandler("log", log_handler))
 
+async def run():
+    asyncio.create_task(background_logger())
+    await app.run_polling()
+
 if __name__ == "__main__":
-    print("✅ Bot is running...")
-    asyncio.run(app.run_polling())
+    print("✅ Bot is running with auto-logging and ML predictions...")
+    asyncio.run(run())
