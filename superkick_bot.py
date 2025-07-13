@@ -1,101 +1,104 @@
 import os
 import csv
-import asyncio
 import nest_asyncio
-from datetime import datetime
-from sklearn.linear_model import LinearRegression
-import numpy as np
-import pandas as pd
+import asyncio
+import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from datetime import datetime
 from playwright.async_api import async_playwright
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import load_model
+
+nest_asyncio.apply()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CSV_FILE = "superkick_data.csv"
+DATA_FILE = "superkick_data.csv"
+MODEL_FILE = "superkick_lstm_model.h5"
 
-# Ensure the CSV file exists
-def ensure_csv():
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['multiplier', 'timestamp'])
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-# Append a new multiplier entry
-def log_multiplier(multiplier):
-    with open(CSV_FILE, mode='a', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow([multiplier, datetime.now().isoformat()])
+logger = logging.getLogger(__name__)
 
-# Extract multiplier using Playwright (async version)
 async def extract_multiplier():
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch()
             page = await browser.new_page()
-            await page.goto("https://www.msport.com")
-            await page.wait_for_timeout(5000)
+            await page.goto("https://www.msport.com/ng/m/casino/games/superkick")
+            await page.wait_for_timeout(10000)
+
             element = await page.query_selector(".move-animation")
             if element:
                 style = await element.get_attribute("style")
                 if style:
-                    scale_part = [s for s in style.split(';') if 'scale' in s]
-                    if scale_part:
-                        scale_value = float(scale_part[0].split('scale(')[1].rstrip(')'))
-                        await browser.close()
-                        return round(scale_value, 2)
+                    for part in style.split(';'):
+                        if 'scale(' in part:
+                            scale_value = float(part.split('scale(')[-1].split(')')[0])
+                            await browser.close()
+                            return scale_value
             await browser.close()
+            return None
     except Exception as e:
-        print(f"[!] Error extracting multiplier: {e}")
-    return None
-
-# ML prediction
-def predict_next_multiplier():
-    if not os.path.exists(CSV_FILE):
+        logger.error(f"[!] Error extracting multiplier: {e}")
         return None
 
-    df = pd.read_csv(CSV_FILE)
-    if len(df) < 10:
-        return None
-
-    X = np.array(range(len(df))).reshape(-1, 1)
-    y = df['multiplier'].values
-
-    model = LinearRegression()
-    model.fit(X, y)
-    next_index = np.array([[len(df)]])
-    prediction = model.predict(next_index)[0]
-    return round(prediction, 2)
-
-# Telegram commands
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Welcome to SuperKick AI Predictor Bot! Use /predict to get the next multiplier prediction.")
-
-async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prediction = predict_next_multiplier()
-    if prediction:
-        await update.message.reply_text(f"🔮 Based on recent trends, the next multiplier is likely around: {prediction}x")
-    else:
-        await update.message.reply_text("⚠️ Not enough data yet. Wait for a few rounds.")
-
-# Background logger
-async def background_logger():
+async def log_multiplier():
     while True:
         multiplier = await extract_multiplier()
         if multiplier:
-            print(f"[+] Multiplier logged: {multiplier}")
-            log_multiplier(multiplier)
+            now = datetime.utcnow().isoformat()
+            file_exists = os.path.isfile(DATA_FILE)
+            with open(DATA_FILE, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                if not file_exists:
+                    writer.writerow(["timestamp", "multiplier"])
+                writer.writerow([now, multiplier])
+            logger.info(f"✅ Logged multiplier: {multiplier}")
         await asyncio.sleep(30)
 
-# Main bot runner
-async def run():
-    ensure_csv()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("predict", predict))
-    asyncio.create_task(background_logger())
-    await app.run_polling()
+def predict_with_lstm():
+    if not os.path.exists(DATA_FILE):
+        return "⚠️ No data available for prediction."
 
-if __name__ == "__main__":
-    print("✅ Bot is running with auto-logging and ML predictions...")
-    nest_asyncio.apply()
-    asyncio.get_event_loop().run_until_complete(run())
+    df = pd.read_csv(DATA_FILE)
+    if len(df) < 20:
+        return "⚠️ Not enough data yet. Wait for a few more rounds."
+
+    data = df['multiplier'].values.reshape(-1, 1)
+    scaler = MinMaxScaler()
+    scaled = scaler.fit_transform(data)
+    seq_length = 10
+
+    if len(scaled) <= seq_length:
+        return "⚠️ Not enough data to form a prediction sequence."
+
+    input_seq = scaled[-seq_length:].reshape(1, seq_length, 1)
+
+    if not os.path.exists(MODEL_FILE):
+        return "⚠️ Trained model not found. Train the model first."
+
+    model = load_model(MODEL_FILE)
+    predicted_scaled = model.predict(input_seq)
+    predicted = scaler.inverse_transform(predicted_scaled)
+    return f"🔮 Based on recent data, the predicted next multiplier is: {predicted[0][0]:.2f}x"
+
+async def predict_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("/predict called")
+    prediction = predict_with_lstm()
+    await update.message.reply_text(prediction)
+
+if __name__ == '__main__':
+    if not BOT_TOKEN:
+        raise ValueError("❌ BOT_TOKEN is missing. Set it in Railway → Variables")
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("predict", predict_command))
+
+    asyncio.create_task(log_multiplier())
+    app.run_polling()
