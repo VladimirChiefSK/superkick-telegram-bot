@@ -1,4 +1,5 @@
 python-telegram-bot==20.7
 pandas
-selenium
+numpy
+scikit-learn
 playwright
