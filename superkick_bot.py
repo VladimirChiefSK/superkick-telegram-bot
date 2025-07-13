@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CSV_FILE = "superkick_data.csv"
@@ -26,24 +26,24 @@ def log_multiplier(multiplier):
         writer = csv.writer(file)
         writer.writerow([multiplier, datetime.now().isoformat()])
 
-# Extract multiplier using Playwright
-def extract_multiplier():
+# Extract multiplier using Playwright (async version)
+async def extract_multiplier():
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page()
-            page.goto("https://www.msport.com")
-            page.wait_for_timeout(5000)
-            element = page.query_selector(".move-animation")
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            page = await browser.new_page()
+            await page.goto("https://www.msport.com")
+            await page.wait_for_timeout(5000)
+            element = await page.query_selector(".move-animation")
             if element:
-                style = element.get_attribute("style")
+                style = await element.get_attribute("style")
                 if style:
                     scale_part = [s for s in style.split(';') if 'scale' in s]
                     if scale_part:
                         scale_value = float(scale_part[0].split('scale(')[1].rstrip(')'))
-                        browser.close()
+                        await browser.close()
                         return round(scale_value, 2)
-            browser.close()
+            await browser.close()
     except Exception as e:
         print(f"[!] Error extracting multiplier: {e}")
     return None
@@ -80,7 +80,7 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Background logger
 async def background_logger():
     while True:
-        multiplier = extract_multiplier()
+        multiplier = await extract_multiplier()
         if multiplier:
             print(f"[+] Multiplier logged: {multiplier}")
             log_multiplier(multiplier)
