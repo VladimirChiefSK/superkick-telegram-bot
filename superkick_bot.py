@@ -10,7 +10,8 @@ from playwright.async_api import async_playwright
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import LSTM, Dense
 
 nest_asyncio.apply()
 
@@ -24,6 +25,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+last_trained_count = 0
 
 async def extract_multiplier():
     try:
@@ -49,6 +52,7 @@ async def extract_multiplier():
         return None
 
 async def log_multiplier():
+    global last_trained_count
     while True:
         multiplier = await extract_multiplier()
         if multiplier:
@@ -60,7 +64,41 @@ async def log_multiplier():
                     writer.writerow(["timestamp", "multiplier"])
                 writer.writerow([now, multiplier])
             logger.info(f"✅ Logged multiplier: {multiplier}")
+
+            # Check if retraining is needed
+            df = pd.read_csv(DATA_FILE)
+            if len(df) - last_trained_count >= 50:
+                logger.info("🔁 Retraining model with new data...")
+                train_lstm_model()
+                last_trained_count = len(df)
         await asyncio.sleep(30)
+
+def train_lstm_model():
+    df = pd.read_csv(DATA_FILE)
+    if len(df) < 20:
+        logger.warning("⚠️ Not enough data to train.")
+        return
+
+    data = df['multiplier'].values.reshape(-1, 1)
+    scaler = MinMaxScaler()
+    scaled = scaler.fit_transform(data)
+    seq_length = 10
+
+    X, y = [], []
+    for i in range(seq_length, len(scaled)):
+        X.append(scaled[i - seq_length:i])
+        y.append(scaled[i])
+
+    X, y = np.array(X), np.array(y)
+
+    model = Sequential()
+    model.add(LSTM(64, activation='relu', input_shape=(seq_length, 1)))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mse')
+    model.fit(X, y, epochs=5, verbose=0)
+
+    model.save(MODEL_FILE)
+    logger.info("✅ Model trained and saved.")
 
 def predict_with_lstm():
     if not os.path.exists(DATA_FILE):
@@ -81,12 +119,12 @@ def predict_with_lstm():
     input_seq = scaled[-seq_length:].reshape(1, seq_length, 1)
 
     if not os.path.exists(MODEL_FILE):
-        return "⚠️ Trained model not found. Train the model first."
+        return "⚠️ Trained model not found."
 
     model = load_model(MODEL_FILE)
     predicted_scaled = model.predict(input_seq)
     predicted = scaler.inverse_transform(predicted_scaled)
-    return f"🔮 Based on recent data, the predicted next multiplier is: {predicted[0][0]:.2f}x"
+    return f"🔮 Based on recent trends, the next multiplier is likely around: {predicted[0][0]:.2f}x"
 
 async def predict_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("/predict called")
